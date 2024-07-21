@@ -827,9 +827,11 @@ static int initf_bootstage(void)
 
 static int initf_dm(void)
 {
+	log_info("===initf_dm===\n");
 #if defined(CONFIG_DM) && CONFIG_IS_ENABLED(SYS_MALLOC_F)
 	int ret;
 
+	log_info("[%s:%d]===initf_dm===\n", __func__, __LINE__);
 	bootstage_start(BOOTSTAGE_ID_ACCUM_DM_F, "dm_f");
 	ret = dm_init_and_scan(true);
 	bootstage_accum(BOOTSTAGE_ID_ACCUM_DM_F);

@@ -87,11 +87,17 @@ clbss_l:cmp	r0, r1			/* while not at end of BSS */
 
 /*
  * entry point of crt0 sequence
+ * _main 在 start.S 中被调用, 用于初始化C runtime环境并调用 board_init_f
  */
 
 ENTRY(_main)
 
 /* Call arch_very_early_init before initializing C runtime environment. */
+/**
+ * 首先查看是否打开了 CONFIG_IS_ENABLED(ARCH_VERY_EARLY_INIT) 这个宏，如果打开了，
+ * 就调用 arch_very_early_init 函数，这个函数是在板级目录下的 lowlevel_init.S 中定义的
+ * 用于初始化板级相关的配置
+ */
 #if CONFIG_IS_ENABLED(ARCH_VERY_EARLY_INIT)
 	bl	arch_very_early_init
 #endif
@@ -99,7 +105,15 @@ ENTRY(_main)
 /*
  * Set up initial C runtime environment and call board_init_f(0).
  */
-
+/**
+ * 现在看看有没有打开 TPL_BUILD 和 CONFIG_TPL_NEEDS_SEPARATE_STACK 这两个宏
+ * 如果有，则配置 TPL 的栈地址为 CONFIG_TPL_STACK
+ *
+ * 如果定义了 SPL_BUILD 和 CONFIG_SPL_STACK 这两个宏，则配置 SPL 的栈地址为 CONFIG_SPL_STACK
+ * 则配置SPL的栈地址为 CONFIG_SPL_STACK
+ *
+ * 如果SPL和TPL都不是用独立的栈，那么就配置栈地址为 SYS_INIT_SP_ADDR
+ */
 #if defined(CONFIG_TPL_BUILD) && defined(CONFIG_TPL_NEEDS_SEPARATE_STACK)
 	ldr	r0, =(CONFIG_TPL_STACK)
 #elif defined(CONFIG_SPL_BUILD) && defined(CONFIG_SPL_STACK)
@@ -107,12 +121,54 @@ ENTRY(_main)
 #else
 	ldr	r0, =(SYS_INIT_SP_ADDR)
 #endif
+
+	/**
+	 * 清除 r0 的低三位，因为栈地址需要是8字节对齐的
+	 */
 	bic	r0, r0, #7	/* 8-byte alignment for ABI compliance */
+
+	/**
+	 * 现在， 将 栈地址配置到栈指针寄存器 sp 中
+	 */
 	mov	sp, r0
+
+	/**
+	 * 这个函数是用于保留一段内存，用于分配一段空间存放全局数据结构 global_data_t
+	 * 这个数据结构在 arch/arm/include/asm/global_data.h 中定义
+	 * 里面存放了一些板子的信息，日志的格式等乱七八糟的信息
+	 *
+	 * 这个函数有个参数 top, 用于指定分配的内存的顶部地址，返回值是 top - sizeof(global_data_t) 的地址
+	 *
+	 * 在ARM调用约定中，前四个参数存放在 r0-r3 中，返回值是存放在 r0 中
+	 *
+	 * 所以此处的 top 参数是存在 r0 中的，也就是栈顶地址，返回值是存放在 r0 中的
+	 *
+	 * 也就表明 global_data_t 结构体是存放在栈中的，并且是放在栈的最底部
+	 *
+	 * 这整个过程就是为了把 global_data_t 结构体压入栈中
+	 */
 	bl	board_init_f_alloc_reserve
+
+	/**
+	 * 将global_data_t 压入栈中后，更新栈指针
+	 */
 	mov	sp, r0
+
 	/* set up gd here, outside any C code */
+	/**
+	 * 将当前栈顶地址存放到 r9 中
+	 */
 	mov	r9, r0
+
+	/**
+	 * 现在调用 board_init_f_init_reserve 函数
+	 * 这个函数在 common/init/board_init.c 中定义
+	 * 
+	 * 这个函数有个参数： ulong base
+	 * 这个 base 表示的是 global_data_t 结构体的地址，也就是寄存器 r0
+	 * 这个函数的作用是初始化 global_data_t 结构体
+	 * 
+	 */
 	bl	board_init_f_init_reserve
 
 #if defined(CONFIG_DEBUG_UART) && CONFIG_IS_ENABLED(SERIAL)

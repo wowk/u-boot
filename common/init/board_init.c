@@ -142,12 +142,21 @@ void board_init_f_init_reserve(ulong base)
 
 	gd_ptr = (struct global_data *)base;
 	/* zero the area */
+	// 首先将gd_ptr指向的内存区域清零
 	memset(gd_ptr, '\0', sizeof(*gd));
 	/* set GD unless architecture did it already */
+	/* 然后调用arm的 global_data_t (如果是arm架构的话) */
 #if !defined(CONFIG_ARM)
 	arch_setup_gd(gd_ptr);
 #endif
 
+	/**
+	 * 将 初始SPL堆栈为0xaa，
+	 * 直到使用SPL_SIZE_LIMIT_PROVIDE_STACK配置的大小为止。
+	 * 稍后，当SPL完成使用此初始堆栈并切换到DRAM中的堆栈时，
+	 * 通过检查内存并搜索最低出现的非0xaa字节来报告此初始堆栈的实际使用大小。
+	 * 此默认实现仅适用于向下增长的堆栈。
+	 */
 	if (CONFIG_IS_ENABLED(SYS_REPORT_STACK_F_USAGE))
 		board_init_f_init_stack_protection_addr(base);
 

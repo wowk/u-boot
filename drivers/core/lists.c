@@ -22,11 +22,13 @@
 
 struct driver *lists_driver_lookup_name(const char *name)
 {
+	// 根据name在定义的U_BOOT_DRIVER驱动中查找对应的驱动
 	struct driver *drv =
 		ll_entry_start(struct driver, driver);
 	const int n_ents = ll_entry_count(struct driver, driver);
 	struct driver *entry;
 
+	// 其实就是遍历driver数组
 	for (entry = drv; entry != drv + n_ents; entry++) {
 		if (!strcmp(name, entry->name))
 			return entry;
@@ -68,6 +70,7 @@ struct uclass_driver *lists_uclass_lookup(enum uclass_id id)
  */
 static int bind_drivers_pass(struct udevice *parent, bool pre_reloc_only)
 {
+	// 获取 driver_info 的数量
 	struct driver_info *info =
 		ll_entry_start(struct driver_info, driver_info);
 	const int n_ents = ll_entry_count(struct driver_info, driver_info);
@@ -81,8 +84,10 @@ static int bind_drivers_pass(struct udevice *parent, bool pre_reloc_only)
 	 * device we can't bind, set missing_parent to true, which will cause
 	 * this function to be called again.
 	 */
+	// 遍历每个driver_info，创建设备并绑定到该设备
 	for (idx = 0; idx < n_ents; idx++) {
 		struct udevice *par = parent;
+		// 获取 driver_rt，其中包含了设备
 		const struct driver_info *entry = info + idx;
 		struct driver_rt *drt = gd_dm_driver_rt() + idx;
 		struct udevice *dev;
@@ -107,6 +112,9 @@ static int bind_drivers_pass(struct udevice *parent, bool pre_reloc_only)
 				par = parent_drt->dev;
 			}
 		}
+
+		// 根据名称创建设备并绑定到该设备
+		log_info("bind %s by name\n", entry->name);
 		ret = device_bind_by_name(par, pre_reloc_only, entry, &dev);
 		if (!ret) {
 			if (CONFIG_IS_ENABLED(OF_PLATDATA))
@@ -121,6 +129,7 @@ static int bind_drivers_pass(struct udevice *parent, bool pre_reloc_only)
 	return result ? result : missing_parent ? -EAGAIN : 0;
 }
 
+// U_BOOT_DRVINFO 搜索所有的 U_BOOT_DRVINFO，并且为其创建设备然后绑定到该设备
 int lists_bind_drivers(struct udevice *parent, bool pre_reloc_only)
 {
 	int result = 0;
@@ -135,8 +144,11 @@ int lists_bind_drivers(struct udevice *parent, bool pre_reloc_only)
 		int ret;
 
 		ret = bind_drivers_pass(parent, pre_reloc_only);
+		// 如果是第一次或者之前发生了 -EAGAIN，那么把新的 返回值 赋值给 result
 		if (!result || result == -EAGAIN)
 			result = ret;
+
+		// 如果返回值不为 -EAGAIN（也就是说要么 bind_drivers_pass 成功了或者 发生了致命错误），则退出循环
 		if (ret != -EAGAIN)
 			break;
 	}
@@ -212,18 +224,20 @@ int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
 
 	if (devp)
 		*devp = NULL;
+	
+	// log_info("[%s:%d] get node name: %s, %s\n", __func__, __LINE__, node.np->name ?: "null", node.np->full_name ?: "null");
 	name = ofnode_get_name(node);
-	log_debug("bind node %s\n", name);
+	log_info("[%s:%d] get node name done: %s\n", __func__, __LINE__, name);
 
 	compat_list = ofnode_get_property(node, "compatible", &compat_length);
 	if (!compat_list) {
 		if (compat_length == -FDT_ERR_NOTFOUND) {
-			log_debug("Device '%s' has no compatible string\n",
+			log_info("Device '%s' has no compatible string\n",
 				  name);
 			return 0;
 		}
 
-		dm_warn("Device tree error at node '%s'\n", name);
+		log_info("Device tree error at node '%s'\n", name);
 		return compat_length;
 	}
 
@@ -234,46 +248,56 @@ int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
 	 */
 	for (i = 0; i < compat_length; i += strlen(compat) + 1) {
 		compat = compat_list + i;
-		log_debug("   - attempt to match compatible string '%s'\n",
-			  compat);
+		log_info("   - attempt to match compatible string '%s'\n", compat);
 
 		id = NULL;
 		for (entry = driver; entry != driver + n_ents; entry++) {
+			log_info("   - check driver '%s'\n", entry->name);
 			if (drv) {
-				if (drv != entry)
+				if (drv != entry) {
 					continue;
-				if (!entry->of_match)
-					break;
-			}
-			ret = driver_check_compatible(entry->of_match, &id,
-						      compat);
-			if (!ret)
-				break;
-		}
-		if (entry == driver + n_ents)
-			continue;
+				}
 
+				if (!entry->of_match) {
+					log_info("   - driver '%s' has no compatible strings\n", entry->name);
+					break;
+				}
+			}
+
+			log_info("   - start checking driver '%s' for compatible string '%s'\n", entry->name, compat);
+			ret = driver_check_compatible(entry->of_match, &id, compat);
+			if (!ret) {
+				log_info("   - found match at driver '%s' for '%s'\n", entry->name, compat);
+				break;
+			}
+		}
+
+		if (entry == driver + n_ents) {
+			log_info("No match for node '%s'\n", name);
+			continue;
+		}
+
+		log_info("get driver '%s' for node '%s'\n", entry->name, name);
 		if (pre_reloc_only) {
-			if (!ofnode_pre_reloc(node) &&
-			    !(entry->flags & DM_FLAG_PRE_RELOC)) {
-				log_debug("Skipping device pre-relocation\n");
+			if (!ofnode_pre_reloc(node) && !(entry->flags & DM_FLAG_PRE_RELOC)) {
+				log_info("Skipping device pre-relocation\n");
 				return 0;
 			}
 		}
 
 		if (entry->of_match)
-			log_debug("   - found match at driver '%s' for '%s'\n",
-				  entry->name, id->compatible);
-		ret = device_bind_with_driver_data(parent, entry, name,
-						   id ? id->data : 0, node,
-						   &dev);
+			log_info("   - found match table at driver '%s' for '%s'\n", entry->name, id->compatible);
+
+		log_info("device bind with driver '%s'\n", entry->name);
+		ret = device_bind_with_driver_data(parent, entry, name, id ? id->data : 0, node, &dev);
+
 		if (ret == -ENODEV) {
-			log_debug("Driver '%s' refuses to bind\n", entry->name);
+			log_info("Driver '%s' refuses to bind\n", entry->name);
 			continue;
 		}
+
 		if (ret) {
-			dm_warn("Error binding driver '%s': %d\n", entry->name,
-				ret);
+			log_info("Error binding driver '%s': %d\n", entry->name, ret);
 			return log_msg_ret("bind", ret);
 		} else {
 			found = true;
@@ -284,7 +308,7 @@ int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
 	}
 
 	if (!found && !result && ret != -ENODEV)
-		log_debug("No match for node '%s'\n", name);
+		log_info("No match for node '%s'\n", name);
 
 	return result;
 }

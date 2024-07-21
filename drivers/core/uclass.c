@@ -692,6 +692,9 @@ int uclass_bind_device(struct udevice *dev)
 	int ret;
 
 	uc = dev->uclass;
+	// 将设备添加到uclass的dev_head链表中
+	log_info("uclass_bind_device: %s to uclass: %s, id: %d, dev uclass: %s\n",
+		dev->name, uc->uc_drv->name, uc->uc_drv->id, dev->uclass->uc_drv->name);
 	list_add_tail(&dev->uclass_node, &uc->dev_head);
 
 	if (dev->parent) {

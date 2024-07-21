@@ -674,8 +674,10 @@ const char *ofnode_get_name(ofnode node)
 		return NULL;
 	}
 
-	if (ofnode_is_np(node))
+	if (ofnode_is_np(node)) {
+		log_info("ofnode_get_name: %s\n", node.np->name);
 		return node.np->name;
+	}
 
 	return fdt_get_name(ofnode_to_fdt(node), ofnode_to_offset(node), NULL);
 }

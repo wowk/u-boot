@@ -63,6 +63,16 @@
 		skip-localhost = <0>;
 	};
 
+	/* 添加一个新驱动的测试节点 */
+	test {
+		compatible = "world";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		reg = <0x12340000 0x1000>;
+		message = "Hello, World!";
+		status = "okay";
+	};
+
 	eth@10002000 {
 		compatible = "sandbox,eth";
 		reg = <0x10002000 0x1000>;

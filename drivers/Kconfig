@@ -4,6 +4,9 @@ source "drivers/core/Kconfig"
 
 # types of drivers sorted in alphabetical order
 
+# 添加一个新的硬件类型的驱动程序
+source "drivers/hello/Kconfig"
+
 source "drivers/adc/Kconfig"
 
 source "drivers/ata/Kconfig"

@@ -303,12 +303,11 @@ const char *fdt_get_name(const void *fdt, int nodeoffset, int *len)
 	const char *nameptr;
 	int err;
 
-	if (fdt_chk_extra() &&
-	    (((err = fdt_ro_probe_(fdt)) < 0)
-	     || ((err = fdt_check_node_offset_(fdt, nodeoffset)) < 0)))
+	if (fdt_chk_extra() && (((err = fdt_ro_probe_(fdt)) < 0) || ((err = fdt_check_node_offset_(fdt, nodeoffset)) < 0)))
 		goto fail;
 
 	nameptr = nh->name;
+	printf("[%s:%d] nameptr: %s\n", __func__, __LINE__, nameptr);
 
 	if (fdt_chk_version() && fdt_version(fdt) < 0x10) {
 		/*
@@ -322,12 +321,14 @@ const char *fdt_get_name(const void *fdt, int nodeoffset, int *len)
 			err = -FDT_ERR_BADSTRUCTURE;
 			goto fail;
 		}
+		printf("[%s:%d] leaf: %s\n", __func__, __LINE__, leaf);
 		nameptr = leaf+1;
 	}
 
 	if (len)
 		*len = strlen(nameptr);
 
+	printf("[%s:%d] nameptr: %s\n", __func__, __LINE__, nameptr);
 	return nameptr;
 
  fail:

@@ -41,7 +41,7 @@ obj-$(CONFIG_$(SPL_)NVME) += nvme/
 obj-$(CONFIG_XEN) += xen/
 obj-$(CONFIG_$(SPL_)FPGA) += fpga/
 obj-$(CONFIG_$(SPL_)VIDEO) += video/
-
+obj-y += hello/
 obj-y += bus/
 
 ifndef CONFIG_TPL_BUILD

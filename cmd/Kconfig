@@ -11,6 +11,11 @@ menuconfig CMDLINE
 
 if CMDLINE
 
+config CMD_HELLO_WORLD
+	bool "hello_world"
+	help
+	  probe Hello World driver
+
 config HUSH_PARSER
 	bool "Use hush shell"
 	help

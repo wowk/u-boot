@@ -57,6 +57,7 @@ void dm_fixup_for_gd_move(struct global_data *new_gd)
 
 static int dm_setup_inst(void)
 {
+	// 获取 root 设备，DM_DEVICE_GET 直接根据设备名展开为段名称来获取设备的定义
 	DM_ROOT_NON_CONST = DM_DEVICE_GET(root);
 
 	if (CONFIG_IS_ENABLED(OF_PLATDATA_RT)) {
@@ -99,6 +100,10 @@ int dm_init(bool of_live)
 		dm_warn("Virtual root driver already exists!\n");
 		return -EINVAL;
 	}
+
+	log_info("create uclass root list head\n");
+
+	// uclass 表示驱动类别， 用于为相似的驱动提供一致的访问接口
 	if (CONFIG_IS_ENABLED(OF_PLATDATA_INST)) {
 		gd->uclass_root = &uclass_head;
 	} else {
@@ -106,24 +111,31 @@ int dm_init(bool of_live)
 		INIT_LIST_HEAD(DM_UCLASS_ROOT_NON_CONST);
 	}
 
+	log_info("create root device done\n");
 	if (CONFIG_IS_ENABLED(OF_PLATDATA_INST)) {
+		log_info("generate platdata by device tree\n");
 		ret = dm_setup_inst();
 		if (ret) {
 			log_debug("dm_setup_inst() failed: %d\n", ret);
 			return ret;
 		}
 	} else {
-		ret = device_bind_by_name(NULL, false, &root_info,
-					  &DM_ROOT_NON_CONST);
+		log_info("bind root device by name\n");
+		// 分配一个 DM_ROOT udevice，并且绑定到 uclass_root (也就是加入到 uclass_root->dev_head 链表中)
+		// 
+		ret = device_bind_by_name(NULL, false, &root_info, &DM_ROOT_NON_CONST);
 		if (ret)
 			return ret;
 		if (CONFIG_IS_ENABLED(OF_CONTROL))
 			dev_set_ofnode(DM_ROOT_NON_CONST, ofnode_root());
+		
+		log_info("probe root device\n");
 		ret = device_probe(DM_ROOT_NON_CONST);
 		if (ret)
 			return ret;
 	}
 
+	log_info("init dmtag list head\n");
 	INIT_LIST_HEAD((struct list_head *)&gd->dmtag_list);
 
 	return 0;
@@ -153,22 +165,32 @@ int dm_scan_plat(bool pre_reloc_only)
 {
 	int ret;
 
+	// 如果定义了 runtime platdata 选项，则为每个设备创建一个 runtime platdata
 	if (CONFIG_IS_ENABLED(OF_PLATDATA_DRIVER_RT)) {
 		struct driver_rt *dyn;
 		int n_ents;
 
+		// 获取定义的 driver_info 数量
 		n_ents = ll_entry_count(struct driver_info, driver_info);
+
+		// 分配 driver_rt 结构体数组
 		dyn = calloc(n_ents, sizeof(struct driver_rt));
 		if (!dyn)
 			return -ENOMEM;
+
+		// 将 driver_rt 数组保存到全局变量 gd->dm_driver_rt
 		gd_set_dm_driver_rt(dyn);
 	}
 
+	// 开始绑定设备和驱动到 uclass
 	ret = lists_bind_drivers(DM_ROOT_NON_CONST, pre_reloc_only);
 	if (ret == -ENOENT) {
 		dm_warn("Some drivers were not found\n");
 		ret = 0;
 	}
+
+	// scan_plat 完成
+	log_info("scan plat done\n");
 
 	return ret;
 }
@@ -195,15 +217,17 @@ static int dm_scan_fdt_node(struct udevice *parent, ofnode parent_node,
 	if (!ofnode_valid(parent_node))
 		return 0;
 
-	for (node = ofnode_first_subnode(parent_node);
-	     ofnode_valid(node);
-	     node = ofnode_next_subnode(node)) {
+	for (node = ofnode_first_subnode(parent_node); ofnode_valid(node); node = ofnode_next_subnode(node)) {
 		const char *node_name = ofnode_get_name(node);
 
+		log_info("scan fdt node %s\n", node_name);
 		if (!ofnode_is_enabled(node)) {
+			log_info("ignore %s, it is not enabled\n", node_name);
 			pr_debug("   - ignoring disabled device\n");
 			continue;
 		}
+
+		log_info("bind fdt node %s\n", node_name);
 		err = lists_bind_fdt(parent, node, NULL, NULL, pre_reloc_only);
 		if (err && !ret) {
 			ret = err;
@@ -246,6 +270,7 @@ int dm_extended_scan(bool pre_reloc_only)
 		"/firmware"
 	};
 
+	log_info("start scanning fdt\n");
 	ret = dm_scan_fdt(pre_reloc_only);
 	if (ret) {
 		dm_warn("dm_scan_fdt() failed: %d\n", ret);
@@ -318,24 +343,37 @@ static int dm_scan(bool pre_reloc_only)
 {
 	int ret;
 
+	// 扫描 U_BOOT_DRVINFO 定义的设备
+	log_info("scan U_BOOT_DRVINFO defined drivers\n");
 	ret = dm_scan_plat(pre_reloc_only);
 	if (ret) {
 		dm_warn("dm_scan_plat() failed: %d\n", ret);
 		return ret;
 	}
+	log_info("scan U_BOOT_DRVINFO defined drivers done\n");
 
+	// 扫描设备树并且创建和绑定设备
+	// 在U-Boot中，`CONFIG_OF_REAL`是一个配置选项，通常在U-Boot的配置文件中设置。这个选项用于启用或禁用对实际设备树（Device Tree）的支持。
+	// 设备树是一种数据结构，用于描述硬件设备的属性和配置，它在Linux和其他嵌入式操作系统中广泛使用，以提供硬件的抽象描述。
+	// 当CONFIG_OF_REAL被启用时，U-Boot会使用实际的设备树来初始化和配置硬件设备。这意味着U-Boot将能够解析设备树结构，
+	// 识别设备树中定义的设备，并根据设备树中的信息对这些设备进行配置和初始化。
 	if (CONFIG_IS_ENABLED(OF_REAL)) {
+		log_info("scan devices extended in fdt\n");
 		ret = dm_extended_scan(pre_reloc_only);
+		log_info("scan devices extended in fdt done\n");
 		if (ret) {
 			dm_warn("dm_extended_scan() failed: %d\n", ret);
 			return ret;
 		}
 	}
 
+	log_info("scan other devices\n");
 	ret = dm_scan_other(pre_reloc_only);
+	log_info("scan other devices done\n");
 	if (ret)
 		return ret;
 
+	log_info("probe devices\n");
 	return dm_probe_devices(gd->dm_root, pre_reloc_only);
 }
 
@@ -343,12 +381,18 @@ int dm_init_and_scan(bool pre_reloc_only)
 {
 	int ret;
 
+	// 初始化并绑定 root 设备
+	log_info("create root udevice and bind to uclass_root and root_driver and call root_driver->bind(xxx)\n");
 	ret = dm_init(CONFIG_IS_ENABLED(OF_LIVE));
 	if (ret) {
 		dm_warn("dm_init() failed: %d\n", ret);
 		return ret;
 	}
+
+	// 扫描设备树并且创建和绑定设备
+	log_info("scan devices in fdt\n");
 	if (!CONFIG_IS_ENABLED(OF_PLATDATA_INST)) {
+		log_info("OF_PLATDATA_INST is not enabled\n");
 		ret = dm_scan(pre_reloc_only);
 		if (ret) {
 			log_debug("dm_scan() failed: %d\n", ret);

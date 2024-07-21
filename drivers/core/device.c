@@ -37,6 +37,9 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+// 设备绑定驱动是一个什么动作 ？？？
+// 其实就是分配一个 udevice 对象，然后初始化这个 udevice 对象，然后将这个 udevice 对象加入到 uclass 的 dev_head 设备链表中
+// 并且调用驱动的 bind 方法（如果定义了的话，如果parent定义了各种 post 方法，也会得到调用）
 static int device_bind_common(struct udevice *parent, const struct driver *drv,
 			      const char *name, void *plat,
 			      ulong driver_data, ofnode node,
@@ -48,47 +51,54 @@ static int device_bind_common(struct udevice *parent, const struct driver *drv,
 	bool auto_seq = true;
 	void *ptr;
 
+	log_info("[%s:%d] name: %s\n", __func__, __LINE__, name);
+	// 首先，如果定义了 OF_PLATDATA_NO_BIND, 就不支持bind
 	if (CONFIG_IS_ENABLED(OF_PLATDATA_NO_BIND))
 		return -ENOSYS;
 
 	if (devp)
 		*devp = NULL;
+
 	if (!name)
 		return -EINVAL;
 
+	// 获取根据 driver id 获取 uclass 对象，这是一对一的关系
 	ret = uclass_get(drv->id, &uc);
 	if (ret) {
 		dm_warn("Missing uclass for driver %s\n", drv->name);
 		return ret;
 	}
 
+	// 分配一个 udevice 对象
 	dev = calloc(1, sizeof(struct udevice));
 	if (!dev)
 		return -ENOMEM;
 
+	// 初始化 udevice 对象
 	INIT_LIST_HEAD(&dev->sibling_node);
 	INIT_LIST_HEAD(&dev->child_head);
 	INIT_LIST_HEAD(&dev->uclass_node);
 #if CONFIG_IS_ENABLED(DEVRES)
 	INIT_LIST_HEAD(&dev->devres_head);
 #endif
+	// 将平台数据绑定到 udevice 对象上
 	dev_set_plat(dev, plat);
 	dev->driver_data = driver_data;
 	dev->name = name;
 	dev_set_ofnode(dev, node);
 	dev->parent = parent;
+	// 将驱动绑定到新分配的 udevice 对象上
 	dev->driver = drv;
+	// 将 uclass 绑定到新分配的 udevice 对象上
 	dev->uclass = uc;
 
 	dev->seq_ = -1;
-	if (CONFIG_IS_ENABLED(DM_SEQ_ALIAS) &&
-	    (uc->uc_drv->flags & DM_UC_FLAG_SEQ_ALIAS)) {
+	if (CONFIG_IS_ENABLED(DM_SEQ_ALIAS) && (uc->uc_drv->flags & DM_UC_FLAG_SEQ_ALIAS)) {
 		/*
 		 * Some devices, such as a SPI bus, I2C bus and serial ports
 		 * are numbered using aliases.
 		 */
-		if (CONFIG_IS_ENABLED(OF_CONTROL) &&
-		    !CONFIG_IS_ENABLED(OF_PLATDATA)) {
+		if (CONFIG_IS_ENABLED(OF_CONTROL) && !CONFIG_IS_ENABLED(OF_PLATDATA)) {
 			if (uc->uc_drv->name && ofnode_valid(node)) {
 				if (!dev_read_alias_seq(dev, &dev->seq_)) {
 					auto_seq = false;
@@ -101,6 +111,7 @@ static int device_bind_common(struct udevice *parent, const struct driver *drv,
 		dev->seq_ = uclass_find_next_free_seq(uc);
 
 	/* Check if we need to allocate plat */
+	// 如果在定义驱动的时候指定了 plat_auto, 就需要分配 plat 用于存放平台数据
 	if (drv->plat_auto) {
 		bool alloc = !plat;
 
@@ -160,21 +171,29 @@ static int device_bind_common(struct udevice *parent, const struct driver *drv,
 		list_add_tail(&dev->sibling_node, &parent->child_head);
 	}
 
+  // 将 uclass 对象和 udevice 对象绑定
+	// 说是绑定，其实就是将 udevice 对象加入到 uclass 的 dev_head 设备链表中
+	// 对于 hello, 其dev->name变成了 test_hello_drv, 为啥 ？？？
 	ret = uclass_bind_device(dev);
 	if (ret)
 		goto fail_uclass_bind;
 
+	// 如果驱动定义了 bind 方法，就调用 bind 方法
 	/* if we fail to bind we remove device from successors and free it */
 	if (drv->bind) {
 		ret = drv->bind(dev);
 		if (ret)
 			goto fail_bind;
 	}
+
+	// 接着调用 parent 的 child_post_bind 方法
 	if (parent && parent->driver->child_post_bind) {
 		ret = parent->driver->child_post_bind(dev);
 		if (ret)
 			goto fail_child_post_bind;
 	}
+
+	// 如果定义了 post_bind 方法，就调用 post_bind 方法
 	if (uc->uc_drv->post_bind) {
 		ret = uc->uc_drv->post_bind(dev);
 		if (ret)
@@ -186,6 +205,7 @@ static int device_bind_common(struct udevice *parent, const struct driver *drv,
 	if (devp)
 		*devp = dev;
 
+	// 设置设备已绑定标志
 	dev_or_flags(dev, DM_FLAG_BOUND);
 
 	return 0;
@@ -242,6 +262,7 @@ int device_bind_with_driver_data(struct udevice *parent,
 				 ulong driver_data, ofnode node,
 				 struct udevice **devp)
 {
+	log_info("[%s:%d] name: %s\n", __func__, __LINE__, name);
 	return device_bind_common(parent, drv, name, NULL, driver_data, node,
 				  0, devp);
 }
@@ -250,6 +271,7 @@ int device_bind(struct udevice *parent, const struct driver *drv,
 		const char *name, void *plat, ofnode node,
 		struct udevice **devp)
 {
+	log_info("[%s:%d] name: %s\n", __func__, __LINE__, name);
 	return device_bind_common(parent, drv, name, plat, 0, node, 0,
 				  devp);
 }
@@ -261,19 +283,32 @@ int device_bind_by_name(struct udevice *parent, bool pre_reloc_only,
 	uint plat_size = 0;
 	int ret;
 
+	// 找到对应的设备驱动
+	log_info("[%s:%d] lookup name: %s\n", __func__, __LINE__, info->name);
 	drv = lists_driver_lookup_name(info->name);
 	if (!drv)
 		return -ENOENT;
-	if (pre_reloc_only && !(drv->flags & DM_FLAG_PRE_RELOC))
+	
+	// 如果指定了 pre_reloc_only 并且驱动没有指定 DM_FLAG_PRE_RELOC 标志，就忽略这个驱动
+	if (pre_reloc_only && !(drv->flags & DM_FLAG_PRE_RELOC)) {
+		log_info("no pre_reloc_flag given, ignore driver：%s\n", info->name);
 		return -EPERM;
+	}
 
+	// 设备驱动可用
 #if CONFIG_IS_ENABLED(OF_PLATDATA)
 	plat_size = info->plat_size;
 #endif
+
+	// 根据设备 info->name 创建设备，并和 udevice/uclass 绑定, 然后调用驱动的 bind 方法以及各种关联的 post_bind 方法
+	log_info("[%s:%d] name: %s\n", __func__, __LINE__, info->name);
 	ret = device_bind_common(parent, drv, info->name, (void *)info->plat, 0,
 				 ofnode_null(), plat_size, devp);
 	if (ret)
 		return ret;
+
+	// 现在 udevice 创建和绑定成功，并且调用了 bind 方法
+	log_info("bind driver %s to %s\n", info->name, (*devp)->name);
 
 	return ret;
 }
